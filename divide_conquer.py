@@ -227,6 +227,5 @@ with gr.Blocks(title="Simple Hospital Encryption Tool", css=css) as app:
                 outputs=decrypted_data_output
             )
 
-# Launch the app
 if __name__ == "__main__":
     app.launch()

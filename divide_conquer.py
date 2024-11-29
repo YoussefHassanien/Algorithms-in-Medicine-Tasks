@@ -1,231 +1,227 @@
 import gradio as gr
-import base64
+import random
 import os
+import base64
+
+# Global variables
+original_depth = None
+min_chunk_size = 5
+fixed_security_level = 3  # Fixed security level (no slider)
+
+def encrypt_chunk(chunk, shift):
+    return ''.join(chr((ord(c) + shift) % 256) for c in chunk)
+
+def decrypt_chunk(chunk, shift):
+    return ''.join(chr((ord(c) - shift) % 256) for c in chunk)
+
+def get_shift(index):
+    return 3 + index
+
+def divide_and_conquer_encrypt(message, depth, index=0):
+    global min_chunk_size
+    if len(message) <= min_chunk_size:
+        for i in range(depth - 1):
+            shift = get_shift(index)
+            encrypt_chunk(message, shift)
+        return encrypt_chunk(message, shift)
+    
+    mid = max(len(message) // 2, min_chunk_size)
+    left = divide_and_conquer_encrypt(message[:mid], depth, index)
+    right = divide_and_conquer_encrypt(message[mid:], depth, index + 1)
+    return left + right
+
+def divide_and_conquer_decrypt(message, depth, original_depth, index=0):
+    global min_chunk_size
+    if depth != original_depth:
+        return ''.join(random.choice('0123456789ABCDEF') for _ in range(len(message)))
+    
+    if len(message) <= min_chunk_size:
+        for i in range(depth - 1):
+            shift = get_shift(index)
+            decrypt_chunk(message, shift)
+        return decrypt_chunk(message, shift)
+    
+    mid = max(len(message) // 2, min_chunk_size)
+    left = divide_and_conquer_decrypt(message[:mid], depth, depth, index)
+    right = divide_and_conquer_decrypt(message[mid:], depth, depth, index + 1)
+    return left + right
 
 def encrypt_message(patient_name, age, gender, address, phone, emergency_contact, insurance, medical_history, diagnosis):
-    # Validate input
+    global original_depth
     if not patient_name or not diagnosis:
         return "Please fill in all required fields"
     
-    # Combine all patient information
     combined_message = (
         f"Name: {patient_name}; Age: {age}; Gender: {gender}; Address: {address}; "
         f"Phone: {phone}; Emergency Contact: {emergency_contact}; Insurance: {insurance}; "
         f"Medical History: {medical_history}; Diagnosis: {diagnosis}"
     )
+    original_depth = fixed_security_level  # Use fixed security level
     
+    # Encrypt and then base64 encode
+    encrypted_message = divide_and_conquer_encrypt(combined_message, fixed_security_level)
+    return base64.b64encode(encrypted_message.encode('utf-8')).decode('utf-8')
+
+def save_encrypted_data(encrypted_message):
+    if not encrypted_message or encrypted_message == "Please fill in all required fields":
+        return "No data to save"
+    
+    # Create a directory for encrypted files if it doesn't exist
+    os.makedirs('encrypted_data', exist_ok=True)
+    
+    # Generate a unique filename based on timestamp
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f'encrypted_data/patient_data_{timestamp}.txt'
+    
+    # Save the base64 encoded encrypted message
     try:
-        # Simple base64 encoding
-        encrypted_message = base64.b64encode(combined_message.encode('utf-8')).decode('utf-8')
-        
-        # Ensure the directory exists
-        os.makedirs('encrypted_files', exist_ok=True)
-        
-        # Save to a file with a unique name
-        filename = os.path.join('encrypted_files', f'{patient_name.replace(" ", "_")}_encrypted.txt')
-        
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(encrypted_message)
-        
-        return f"Encrypted data saved to {filename}"
-    
+        return f"Data saved successfully to {filename}"
     except Exception as e:
-        return f"Error encrypting data: {str(e)}"
+        return f"Error saving file: {str(e)}"
 
-def decrypt_message(encrypted_file=None):
-    if encrypted_file is None:
+def read_uploaded_file(file):
+    """
+    Read the content of an uploaded file.
+    
+    Args:
+    file (dict): Gradio file upload dictionary
+    
+    Returns:
+    str: Content of the file
+    """
+    if file is None:
+        return ""
+    
+    try:
+        # Check if file is a dictionary from Gradio upload
+        if isinstance(file, dict):
+            file_path = file['name']
+        elif hasattr(file, 'name'):
+            # Handle temporary file wrapper
+            file_path = file.name
+        else:
+            # Direct file path
+            file_path = file
+        
+        # Read file content
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+def decrypt_message(encrypted_message):
+    global original_depth
+    if not encrypted_message:
         return []
 
     try:
-        # Extract the actual file path from the temporary file wrapper
-        file_path = encrypted_file.name if hasattr(encrypted_file, 'name') else encrypted_file
+        # Ensure original_depth is set for the decryption
+        if original_depth is None:
+            original_depth = fixed_security_level
         
-        # Read the encrypted file
-        with open(file_path, 'r', encoding='utf-8') as f:
-            encrypted_message = f.read().strip()
+        # Decode base64 first
+        decoded_message = base64.b64decode(encrypted_message).decode('utf-8')
         
-        # Decode the base64 message
-        decrypted_message = base64.b64decode(encrypted_message).decode('utf-8')
+        # Then decrypt
+        decrypted_data = divide_and_conquer_decrypt(decoded_message, fixed_security_level, original_depth)
         
-        # Split the decrypted message into fields
-        fields = [field.strip() for field in decrypted_message.split(';') if field]
-        data = [[field.split(':')[0].strip(), field.split(':')[1].strip()] for field in fields]
-        
+        # Parse the decrypted data into a dictionary
+        fields = [field.strip() for field in decrypted_data.split(";") if field]
+        data = [[field.split(":")[0].strip(), field.split(":")[1].strip()] for field in fields]
         return data
-    
     except Exception as e:
         return [["Error", str(e)]]
 
-# Custom CSS for modern styling and enhanced color scheme
-css = """
-/* Global Styles */
-# Encrypt Data, # Decrypt Data {
-    background-color: #ffffff;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-}
+# Custom theme for colors
+custom_theme = gr.themes.Base(
+    primary_hue="blue",   # Set the primary color (button, slider, etc.)
+    secondary_hue="green", # Set secondary color (background, etc.)
+    neutral_hue="gray",    # Set neutral color
+)
 
-/* Page background and main layout */
-body {
-    background-color: #f4f8f9;
-    font-family: 'Arial', sans-serif;
-    color: #333;
-}
+# Modern Layout with Gradio
+with gr.Blocks(title="Hospital Registration Encryption Tool", theme=custom_theme) as app:
+    gr.Markdown("## 🏥  Hospital Registration Encryption Tool")
+    gr.Markdown("Securely store and transmit sensitive patient information.")
 
-/* Title */
-h1 {
-    font-size: 2.5rem;
-    color: #005F73;
-    text-align: center;
-    margin-bottom: 30px;
-    font-weight: 700;
-}
-
-/* Custom button styling */
-.gradio-button {
-    background-color: #2a9d8f; /* Teal */
-    color: white;
-    font-weight: bold;
-    border-radius: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-    transition: background-color 0.3s ease, transform 0.2s;
-}
-
-.gradio-button:hover {
-    background-color: #21867a; /* Darker Teal */
-    transform: translateY(-2px);
-    cursor: pointer;
-}
-
-/* Custom input styling */
-input, textarea {
-    border: 2px solid #e1e1e1;
-    border-radius: 10px;
-    padding: 12px 16px;
-    font-size: 14px;
-    margin-bottom: 12px;
-    width: 100%;
-    box-sizing: border-box;
-    background-color: #f9f9f9;
-    transition: border-color 0.3s ease;
-}
-
-input:focus, textarea:focus {
-    border-color: #2a9d8f;
-    outline: none;
-    background-color: #ffffff;
-}
-
-/* Custom output styling */
-#encrypt_output {
-    color: #2a9d8f;
-    font-size: 16px;
-    font-weight: bold;
-    margin-top: 10px;
-    text-align: center;
-}
-
-/* Decrypted data output */
-#decrypted_data_output {
-    border: 2px solid #ddd; 
-    background-color: #ffffff;
-    color: #333;
-    border-radius: 8px;
-    padding: 12px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    margin-top: 10px;
-}
-
-/* Tab styles */
-.gr-tabs {
-    background-color: #ffffff;
-    border-radius: 12px;
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-}
-
-.gr-tab {
-    padding: 15px;
-}
-
-.gr-tab-button {
-    background-color: #edf2f4;
-    border: 2px solid #ccc;
-    color: #333;
-    font-weight: 600;
-    font-size: 16px;
-    padding: 8px 16px;
-    border-radius: 6px;
-}
-
-.gr-tab-button:active {
-    background-color: #d0d8e2;
-}
-
-/* Responsive Layouts */
-@media (max-width: 768px) {
-    h1 {
-        font-size: 2rem;
-    }
-
-    .gr-row {
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .gr-column {
-        width: 100%;
-    }
-}
-"""
-
-# Create Gradio interface
-with gr.Blocks(title="Simple Hospital Encryption Tool", css=css) as app:
-    # Add title with custom colors and modern style
-    gr.Markdown("<h1>Simple Hospital Encryption Tool</h1>")
-    
     with gr.Tabs():
         # Encryption Tab
         with gr.Tab("Encrypt Data"):
+            gr.Markdown("### 📋 Patient Registration Form")
             with gr.Row():
                 with gr.Column():
-                    patient_name = gr.Textbox(label="Patient Name", elem_id="patient_name")
-                    age = gr.Number(label="Age")
-                    gender = gr.Radio(choices=["Male", "Female"], label="Gender")
-                    address = gr.Textbox(label="Address")
+                    patient_name = gr.Textbox(label="Patient Name", placeholder="Enter full name", interactive=True, elem_id="patient-name")
+                    age = gr.Number(label="Age", value=0, interactive=True, elem_id="age")
+                    gender = gr.Radio(choices=["Male", "Female"], label="Gender", interactive=True, elem_classes=["gr-radio-row"])
+                    address = gr.Textbox(label="Address", placeholder="Enter full address", interactive=True, elem_id="address")
                 with gr.Column():
-                    phone = gr.Textbox(label="Phone Number")
-                    emergency_contact = gr.Textbox(label="Emergency Contact")
-                    insurance = gr.Textbox(label="Insurance Provider")
-                    medical_history = gr.Textbox(label="Medical History")
-            
-            diagnosis = gr.Textbox(label="Diagnosis", lines=2, elem_id="diagnosis")
-            encrypt_button = gr.Button("🔒 Encrypt Data", elem_classes=["gr-button-icon"])
-            encrypt_output = gr.Textbox(label="Encryption Status", elem_id="encrypt_output")
+                    phone = gr.Textbox(label="Phone Number", placeholder="Enter phone number", interactive=True, elem_id="phone")
+                    emergency_contact = gr.Textbox(label="Emergency Contact", placeholder="Enter emergency contact details", interactive=True, elem_id="emergency-contact")
+                    insurance = gr.Textbox(label="Insurance Provider", placeholder="Enter insurance provider name", interactive=True, elem_id="insurance")
+                    medical_history = gr.Textbox(label="Medical History", placeholder="Enter medical history details", interactive=True, elem_id="medical-history")
+            gr.Markdown("---")
+            with gr.Row():
+                diagnosis = gr.Textbox(label="Diagnosis", placeholder="Enter diagnosis details", interactive=True, lines=2, elem_id="diagnosis")
+            encrypt_output = gr.Textbox(label="Encrypted Registration Data", interactive=False, elem_id="encrypt-output")
+            encrypt_button = gr.Button("Encrypt Data", elem_id="encrypt-btn")
+            save_button = gr.Button("Save Encrypted Data", elem_id="save-btn")
             
             encrypt_button.click(
                 fn=encrypt_message,
                 inputs=[patient_name, age, gender, address, phone, emergency_contact, insurance, medical_history, diagnosis],
                 outputs=encrypt_output
             )
+            
+            save_button.click(
+                fn=save_encrypted_data,
+                inputs=encrypt_output,
+                outputs=encrypt_output
+            )
 
         # Decryption Tab
         with gr.Tab("Decrypt Data"):
-            decrypt_input = gr.File(label="Upload Encrypted File")
-            decrypt_button = gr.Button("🔓 Decrypt Data", elem_classes=["gr-button-icon"])
+            gr.Markdown("### 🔓 Decrypt Encrypted Data")
+            with gr.Row():
+                # File upload component
+                file_input = gr.File(label="Browse Encrypted File", type="filepath")
+                decrypt_input = gr.Textbox(label="Encrypted Data", placeholder="Encrypted text will appear here", interactive=False, lines=3, elem_id="decrypt-input")
+            
             decrypted_data_output = gr.Dataframe(
                 headers=["Field", "Value"], 
                 datatype=["str", "str"], 
-                label="Decrypted Registration Data", elem_id="decrypted_data_output"
+                label="Decrypted Registration Data", interactive=False, elem_id="decrypted-data-output"
             )
             
-            decrypt_button.click(
+            # Auto-decrypt on file upload
+            file_input.upload(
+                fn=read_uploaded_file, 
+                inputs=file_input, 
+                outputs=decrypt_input
+            )
+            
+            # Auto-decrypt on file upload
+            decrypt_input.change(
                 fn=decrypt_message,
                 inputs=[decrypt_input],
                 outputs=decrypted_data_output
             )
+            
+            # Clear data when file is removed
+            file_input.clear(
+                lambda: [["", ""]], 
+                None, 
+                decrypted_data_output
+            )
 
+# Custom CSS for specific components (optional)
+app.css = """
+#encrypt-btn, #save-btn { background-color: #4CAF50; color: white; }
+#decrypt-btn { background-color: #4CAF50; color: white; }
+"""
+
+# Launch the Gradio app
 if __name__ == "__main__":
     app.launch()

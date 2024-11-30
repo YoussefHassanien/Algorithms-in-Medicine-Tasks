@@ -2,10 +2,14 @@ import gradio as gr
 import os
 import base64
 from datetime import datetime
+from dotenv import load_dotenv
 
-# Global variables
-min_chunk_size = 5
-fixed_security_level = 3  # Fixed security level (no slider)
+# Load environment variables from .env file (if using dotenv)
+load_dotenv()
+
+# Read environment variables
+min_chunk_size = int(os.getenv('MIN_CHUNK_SIZE', 5))  # Default to 5 if not set
+fixed_security_level = int(os.getenv('FIXED_SECURITY_LEVEL', 3))  # Default to 3 if not set
 
 def encrypt_chunk(chunk, shift):
     return ''.join(chr((ord(c) + shift) % 256) for c in chunk)

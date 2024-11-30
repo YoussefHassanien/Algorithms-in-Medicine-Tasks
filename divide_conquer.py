@@ -1,10 +1,9 @@
 import gradio as gr
-import random
 import os
 import base64
+from datetime import datetime
 
 # Global variables
-original_depth = None
 min_chunk_size = 5
 fixed_security_level = 3  # Fixed security level (no slider)
 
@@ -22,7 +21,7 @@ def divide_and_conquer_encrypt(message, depth, index=0):
     if len(message) <= min_chunk_size:
         for i in range(depth - 1):
             shift = get_shift(index)
-            encrypt_chunk(message, shift)
+            message = encrypt_chunk(message, shift)
         return encrypt_chunk(message, shift)
     
     mid = max(len(message) // 2, min_chunk_size)
@@ -30,24 +29,21 @@ def divide_and_conquer_encrypt(message, depth, index=0):
     right = divide_and_conquer_encrypt(message[mid:], depth, index + 1)
     return left + right
 
-def divide_and_conquer_decrypt(message, depth, original_depth, index=0):
+def divide_and_conquer_decrypt(message, depth, index=0):
     global min_chunk_size
-    if depth != original_depth:
-        return ''.join(random.choice('0123456789ABCDEF') for _ in range(len(message)))
     
     if len(message) <= min_chunk_size:
         for i in range(depth - 1):
             shift = get_shift(index)
-            decrypt_chunk(message, shift)
+            message = decrypt_chunk(message, shift)
         return decrypt_chunk(message, shift)
     
     mid = max(len(message) // 2, min_chunk_size)
-    left = divide_and_conquer_decrypt(message[:mid], depth, depth, index)
-    right = divide_and_conquer_decrypt(message[mid:], depth, depth, index + 1)
+    left = divide_and_conquer_decrypt(message[:mid], depth, index)
+    right = divide_and_conquer_decrypt(message[mid:], depth, index + 1)
     return left + right
 
 def encrypt_message(patient_name, age, gender, address, phone, emergency_contact, insurance, medical_history, diagnosis):
-    global original_depth
     if not patient_name or not diagnosis:
         return "Please fill in all required fields"
     
@@ -56,11 +52,10 @@ def encrypt_message(patient_name, age, gender, address, phone, emergency_contact
         f"Phone: {phone}; Emergency Contact: {emergency_contact}; Insurance: {insurance}; "
         f"Medical History: {medical_history}; Diagnosis: {diagnosis}"
     )
-    original_depth = fixed_security_level  # Use fixed security level
     
-    # Encrypt and then base64 encode
     encrypted_message = divide_and_conquer_encrypt(combined_message, fixed_security_level)
-    return base64.b64encode(encrypted_message.encode('utf-8')).decode('utf-8')
+    encoded_message = base64.b64encode(encrypted_message.encode('utf-8')).decode('utf-8')
+    return encoded_message
 
 def save_encrypted_data(encrypted_message):
     if not encrypted_message or encrypted_message == "Please fill in all required fields":
@@ -70,7 +65,6 @@ def save_encrypted_data(encrypted_message):
     os.makedirs('encrypted_data', exist_ok=True)
     
     # Generate a unique filename based on timestamp
-    from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f'encrypted_data/patient_data_{timestamp}.txt'
     
@@ -113,20 +107,16 @@ def read_uploaded_file(file):
         return f"Error reading file: {str(e)}"
 
 def decrypt_message(encrypted_message):
-    global original_depth
     if not encrypted_message:
         return []
 
     try:
-        # Ensure original_depth is set for the decryption
-        if original_depth is None:
-            original_depth = fixed_security_level
         
         # Decode base64 first
         decoded_message = base64.b64decode(encrypted_message).decode('utf-8')
         
         # Then decrypt
-        decrypted_data = divide_and_conquer_decrypt(decoded_message, fixed_security_level, original_depth)
+        decrypted_data = divide_and_conquer_decrypt(decoded_message, fixed_security_level)
         
         # Parse the decrypted data into a dictionary
         fields = [field.strip() for field in decrypted_data.split(";") if field]
